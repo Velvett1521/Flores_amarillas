@@ -78,7 +78,7 @@ function initFlowers() {
         // Three rings with generous spacing in both axes
         const ring = i%3;
         const distFactor = ring===0 ? 0.14 : ring===1 ? 0.25 : 0.34;
-        const dist = Math.min(W,H) * (distFactor + Math.random()*0.04);
+        const dist = Math.min(W,H) * (distFactor + Math.random()*0.035);
 
         // full spread: horizontal AND vertical
         const tx = CX + Math.cos(angle)*dist*(1.10+Math.random()*0.20);
