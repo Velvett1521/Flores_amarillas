@@ -29,7 +29,7 @@ const tctx = tc.getContext('2d');
 
 /* ─── config ─── */
 const TEXT        = 'por si no te dieron flores amarillas';
-const NUM_FLOWERS = 26;
+const NUM_FLOWERS = 38;
 
 let flowers = [], frame = 0;
 let W, H, CX, CY, S; // S = responsive scale
@@ -57,9 +57,9 @@ function bzTan(t, p0,p1,p2,p3) {
 function resize() {
     W = fc.width = tc.width  = window.innerWidth;
     H = fc.height= tc.height = window.innerHeight;
-    S  = Math.min(W, H) / 560;
+    S  = Math.min(W, H) / 400;
     CX = W / 2;
-    CY = H * 0.70;
+    CY = H * 0.74;
     frame=0; textStartFrame=-1; textCharIndex=0; textDone=false;
     tctx.clearRect(0,0,W,H);
     initFlowers();
@@ -68,20 +68,21 @@ function resize() {
 /* ─── flower init ─── */
 function initFlowers() {
     flowers = [];
-    // spread tighter so bouquet stays compact
-    const SPREAD = Math.PI * 0.70;
+    // wide fan — tall AND wide for a lush, full bouquet
+    const SPREAD = Math.PI * 0.90;
 
     for (let i=0; i<NUM_FLOWERS; i++) {
         const norm  = i/(NUM_FLOWERS-1);
         const angle = -Math.PI/2 + SPREAD*(norm-0.5);
 
-        // Three rings for density
+        // Three rings with generous spacing in both axes
         const ring = i%3;
-        const distFactor = ring===0 ? 0.12 : ring===1 ? 0.16 : 0.20;
-        const dist = Math.min(W,H) * (distFactor + Math.random()*0.03);
+        const distFactor = ring===0 ? 0.14 : ring===1 ? 0.25 : 0.34;
+        const dist = Math.min(W,H) * (distFactor + Math.random()*0.04);
 
-        const tx = CX + Math.cos(angle)*dist*(0.88+Math.random()*0.24);
-        const ty = CY + Math.sin(angle)*dist*(0.90+Math.random()*0.15);
+        // full spread: horizontal AND vertical
+        const tx = CX + Math.cos(angle)*dist*(1.10+Math.random()*0.20);
+        const ty = CY + Math.sin(angle)*dist*(1.10+Math.random()*0.12);
 
         // Bézier — upright organic curve
         const p1x = CX+(tx-CX)*0.22+(Math.random()-.5)*28*S;
@@ -225,50 +226,106 @@ function drawFlower(f, progress) {
     ctx.restore();
 }
 
-/* ─── text: letter by letter ─── */
-const CHAR_DELAY = 4; // frames per char
+/* ─── text: responsive + letter by letter ─── */
+const CHAR_DELAY = 4;
+const PADDING    = 0.08; // min side margin as fraction of W
 
-function getFontSize() {
-    return Math.round(Math.max(16, Math.min(W*.046, 38)));
+// Find the largest font size where the full text fits in one line,
+// capped so it never looks huge on desktop either.
+function calcFontAndLines() {
+    const maxW  = W * (1 - PADDING * 2);
+    // start from a generous size and shrink until it fits, or split into 2 lines
+    let fs = Math.min(W * 0.10, 72);
+    tctx.font = `600 ${fs}px 'Dancing Script', cursive`;
+
+    // Try single line first
+    if (tctx.measureText(TEXT).width <= maxW) {
+        return { fs, lines: [TEXT] };
+    }
+
+    // Split at best word boundary for two lines
+    const words  = TEXT.split(' ');
+    const half   = Math.ceil(words.length / 2);
+    const line1  = words.slice(0, half).join(' ');
+    const line2  = words.slice(half).join(' ');
+
+    // Shrink until both lines fit
+    while (fs > 14) {
+        tctx.font = `600 ${fs}px 'Dancing Script', cursive`;
+        const w1 = tctx.measureText(line1).width;
+        const w2 = tctx.measureText(line2).width;
+        if (Math.max(w1, w2) <= maxW) break;
+        fs -= 1;
+    }
+    return { fs, lines: [line1, line2] };
+}
+
+// Flatten lines into a single char sequence with a sentinel '\n'
+// so the letter-by-letter loop just iterates TEXT_CHARS
+let TEXT_CHARS = [];
+let textLayout = null; // { fs, lines, lineY[] }
+
+function buildLayout() {
+    const { fs, lines } = calcFontAndLines();
+    tctx.font = `600 ${fs}px 'Dancing Script', cursive`;
+
+    const lineH  = fs * 1.45;
+    const totalH = lineH * lines.length;
+    // vertical anchor: top area, never below 14% of screen
+    const topY   = Math.max(fs * 1.6, H * 0.06);
+    const lineY  = lines.map((_, i) => topY + i * lineH);
+
+    // char list: [{char, line, x}] — x is pre-measured
+    TEXT_CHARS = [];
+    lines.forEach((line, li) => {
+        const lw     = tctx.measureText(line).width;
+        const startX = (W - lw) / 2;
+        let cx = startX;
+        for (const ch of line) {
+            TEXT_CHARS.push({ ch, li, x: cx, y: lineY[li] });
+            cx += tctx.measureText(ch).width;
+        }
+    });
+
+    textLayout = { fs, lines, lineY };
 }
 
 function drawTextIncremental() {
-    if(textDone) return;
-    const fs   = getFontSize();
-    const font = `600 ${fs}px 'Dancing Script', cursive`;
-    tctx.font  = font;
-    tctx.textBaseline='middle';
+    if (textDone) return;
 
-    const totalW  = tctx.measureText(TEXT).width;
-    const startX  = (W-totalW)/2;
-    const y       = Math.max(fs*1.9, H*.09);
+    // Rebuild layout every frame so it stays correct after resize
+    buildLayout();
+    const { fs } = textLayout;
 
-    tctx.clearRect(0,0,W,H);
-    tctx.shadowColor='rgba(255,185,0,.22)';
-    tctx.shadowBlur=10;
-    tctx.fillStyle='#8a5c00';
+    tctx.clearRect(0, 0, W, H);
+    tctx.font          = `600 ${fs}px 'Dancing Script', cursive`;
+    tctx.textBaseline  = 'middle';
+    tctx.shadowColor   = 'rgba(255,185,0,.25)';
+    tctx.shadowBlur    = 10;
+    tctx.fillStyle     = '#8a5c00';
 
-    // draw committed chars
-    let x=startX;
-    for(let i=0;i<textCharIndex;i++){
-        tctx.globalAlpha=1;
-        tctx.fillText(TEXT[i],x,y);
-        x+=tctx.measureText(TEXT[i]).width;
+    // committed chars
+    for (let i = 0; i < textCharIndex; i++) {
+        const c = TEXT_CHARS[i];
+        tctx.globalAlpha = 1;
+        tctx.fillText(c.ch, c.x, c.y);
     }
 
     // current char fading in
-    if(textCharIndex<TEXT.length){
-        const subF=(frame-textStartFrame)%CHAR_DELAY;
-        tctx.globalAlpha=subF/CHAR_DELAY;
-        tctx.fillText(TEXT[textCharIndex],x,y);
-        tctx.globalAlpha=1;
-        if(subF===CHAR_DELAY-1){
+    if (textCharIndex < TEXT_CHARS.length) {
+        const subF = (frame - textStartFrame) % CHAR_DELAY;
+        const c    = TEXT_CHARS[textCharIndex];
+        tctx.globalAlpha = subF / CHAR_DELAY;
+        tctx.fillText(c.ch, c.x, c.y);
+        tctx.globalAlpha = 1;
+        if (subF === CHAR_DELAY - 1) {
             textCharIndex++;
-            if(textCharIndex>=TEXT.length) textDone=true;
+            if (textCharIndex >= TEXT_CHARS.length) textDone = true;
         }
     }
 
-    tctx.shadowBlur=0; tctx.shadowColor='transparent';
+    tctx.shadowBlur  = 0;
+    tctx.shadowColor = 'transparent';
 }
 
 /* ─── main loop ─── */
