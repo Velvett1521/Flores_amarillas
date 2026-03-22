@@ -7,348 +7,295 @@
     <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600&family=Quicksand:wght@300;400&display=swap" rel="stylesheet">
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
+        html, body { width:100%; height:100%; overflow:hidden; }
         body {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            background: radial-gradient(ellipse at 50% 80%, #fff8e1 0%, #fffdf5 60%, #fdf6e3 100%);
-            overflow: hidden;
-            font-family: 'Quicksand', sans-serif;
+            background: radial-gradient(ellipse at 50% 30%, #fff9e6 0%, #fffdf5 55%, #fdf0d0 100%);
         }
-
-        canvas { display: block; }
-
-        .message {
-            position: fixed;
-            bottom: 6%;
-            left: 50%;
-            transform: translateX(-50%);
-            font-family: 'Dancing Script', cursive;
-            font-size: clamp(1.4rem, 4vw, 2.4rem);
-            color: #9a6b00;
-            opacity: 0;
-            transition: opacity 2.5s ease-in-out;
-            text-align: center;
-            width: 90%;
-            pointer-events: none;
-            letter-spacing: 0.02em;
-            text-shadow: 0 1px 8px rgba(255,200,0,0.18);
+        #flowerCanvas, #textCanvas {
+            position: fixed; top:0; left:0; width:100%; height:100%;
         }
-
-        .message.show { opacity: 1; }
+        #textCanvas { pointer-events:none; z-index:10; }
     </style>
 </head>
 <body>
     <canvas id="flowerCanvas"></canvas>
-    <div class="message" id="textMessage">por si no te dieron flores amarillas 🌻</div>
-
+    <canvas id="textCanvas"></canvas>
 <script>
-const canvas = document.getElementById('flowerCanvas');
-const ctx = canvas.getContext('2d');
-const message = document.getElementById('textMessage');
+/* ─── canvases ─── */
+const fc   = document.getElementById('flowerCanvas');
+const ctx  = fc.getContext('2d');
+const tc   = document.getElementById('textCanvas');
+const tctx = tc.getContext('2d');
 
-let flowers = [];
-let frame = 0;
-const NUM_FLOWERS = 16;
+/* ─── config ─── */
+const TEXT        = 'por si no te dieron flores amarillas';
+const NUM_FLOWERS = 26;
 
-/* ─── helpers ─── */
-function ease(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+let flowers = [], frame = 0;
+let W, H, CX, CY, S; // S = responsive scale
+let textStartFrame = -1, textCharIndex = 0, textDone = false;
 
-function getBezierPoint(t, p0, p1, p2, p3) {
-    const u = 1 - t;
+/* ─── math ─── */
+const easeInOut = t => t<.5 ? 2*t*t : -1+(4-2*t)*t;
+
+function bz(t, p0,p1,p2,p3) {
+    const u=1-t;
     return {
         x: u*u*u*p0.x + 3*u*u*t*p1.x + 3*u*t*t*p2.x + t*t*t*p3.x,
         y: u*u*u*p0.y + 3*u*u*t*p1.y + 3*u*t*t*p2.y + t*t*t*p3.y
     };
 }
-
-function getBezierTangent(t, p0, p1, p2, p3) {
-    const u = 1 - t;
+function bzTan(t, p0,p1,p2,p3) {
+    const u=1-t;
     return {
-        x: 3*u*u*(p1.x-p0.x) + 6*u*t*(p2.x-p1.x) + 3*t*t*(p3.x-p2.x),
-        y: 3*u*u*(p1.y-p0.y) + 6*u*t*(p2.y-p1.y) + 3*t*t*(p3.y-p2.y)
+        x: 3*u*u*(p1.x-p0.x)+6*u*t*(p2.x-p1.x)+3*t*t*(p3.x-p2.x),
+        y: 3*u*u*(p1.y-p0.y)+6*u*t*(p2.y-p1.y)+3*t*t*(p3.y-p2.y)
     };
 }
 
-/* ─── init ─── */
+/* ─── resize ─── */
 function resize() {
-    canvas.width  = window.innerWidth;
-    canvas.height = window.innerHeight;
-    frame = 0;
-    message.classList.remove('show');
+    W = fc.width = tc.width  = window.innerWidth;
+    H = fc.height= tc.height = window.innerHeight;
+    S  = Math.min(W, H) / 560;
+    CX = W / 2;
+    CY = H * 0.70;
+    frame=0; textStartFrame=-1; textCharIndex=0; textDone=false;
+    tctx.clearRect(0,0,W,H);
     initFlowers();
 }
 
+/* ─── flower init ─── */
 function initFlowers() {
     flowers = [];
-    const cx = canvas.width  / 2;
-    const cy = canvas.height * 0.72;
+    // spread tighter so bouquet stays compact
+    const SPREAD = Math.PI * 0.70;
 
-    for (let i = 0; i < NUM_FLOWERS; i++) {
-        // Fan spread: from -120° to -60° (pointing upward, fanned)
-        const spread = Math.PI * 0.85;
-        const baseAngle = -Math.PI / 2; // straight up
-        const angle = baseAngle + spread * ((i / (NUM_FLOWERS - 1)) - 0.5);
+    for (let i=0; i<NUM_FLOWERS; i++) {
+        const norm  = i/(NUM_FLOWERS-1);
+        const angle = -Math.PI/2 + SPREAD*(norm-0.5);
 
-        const dist = 130 + Math.random() * 100;
-        const tx = cx + Math.cos(angle) * dist;
-        const ty = cy + Math.sin(angle) * dist;
+        // Three rings for density
+        const ring = i%3;
+        const distFactor = ring===0 ? 0.12 : ring===1 ? 0.16 : 0.20;
+        const dist = Math.min(W,H) * (distFactor + Math.random()*0.03);
 
-        // Organic Bézier controls
-        const midX = (cx + tx) / 2;
-        const midY = (cy + ty) / 2;
-        const p1x = cx   + (midX - cx)   * 0.4 + (Math.random() - 0.5) * 60;
-        const p1y = cy   + (midY - cy)   * 0.3 - 60 - Math.random() * 40;
-        const p2x = midX + (tx  - midX)  * 0.6 + (Math.random() - 0.5) * 40;
-        const p2y = midY + (ty  - midY)  * 0.5 + (Math.random() - 0.5) * 30;
+        const tx = CX + Math.cos(angle)*dist*(0.88+Math.random()*0.24);
+        const ty = CY + Math.sin(angle)*dist*(0.90+Math.random()*0.15);
+
+        // Bézier — upright organic curve
+        const p1x = CX+(tx-CX)*0.22+(Math.random()-.5)*28*S;
+        const p1y = CY-75*S-Math.random()*25*S;
+        const p2x = CX+(tx-CX)*0.72+(Math.random()-.5)*18*S;
+        const p2y = ty+35*S+(Math.random()-.5)*18*S;
 
         flowers.push({
-            p0: { x: cx, y: cy },
-            p1: { x: p1x, y: p1y },
-            p2: { x: p2x, y: p2y },
-            p3: { x: tx,  y: ty  },
-            size:      30 + Math.random() * 14,
-            numPetals: 8 + (Math.random() > 0.5 ? 0 : 1),
-            hue:       42 + (Math.random() - 0.5) * 16,   // golden yellow range
-            delay:     i * 28,
-            STEM_DUR:  140,
-            BLOOM_DUR: 55,
+            p0:{x:CX,y:CY}, p1:{x:p1x,y:p1y}, p2:{x:p2x,y:p2y}, p3:{x:tx,y:ty},
+            size:      (20+Math.random()*12)*S,
+            numPetals: 8+(Math.random()>.6?1:0),
+            hue:       40+(Math.random()-.5)*18,
+            delay:     Math.floor(i*20),
+            STEM_DUR:  105,
+            BLOOM_DUR: 48,
             stemDone:  false,
-            // leaf positions along stem
-            leaves: [
-                { t: 0.38 + Math.random()*0.08, side: Math.random() > 0.5 ? 1 : -1, size: 10 + Math.random()*5 },
-                { t: 0.62 + Math.random()*0.08, side: Math.random() > 0.5 ? 1 : -1, size:  8 + Math.random()*4 }
+            leaves:[
+                {t:.33+Math.random()*.1, side:(Math.random()>.5?1:-1), size:(8+Math.random()*5)*S},
+                {t:.58+Math.random()*.1, side:(Math.random()>.5?1:-1), size:(7+Math.random()*4)*S}
             ]
         });
     }
 }
 
-/* ─── drawing ─── */
-function drawWrapper(cx, cy) {
+/* ─── wrapper ─── */
+function drawWrapper() {
+    const cx=CX, cy=CY, s=S;
+    const w=68*s, h=148*s;
     ctx.save();
 
-    // ── paper cone shadow
+    // shadow
     ctx.beginPath();
-    ctx.moveTo(cx - 10, cy + 10);
-    ctx.lineTo(cx - 72, cy + 155);
-    ctx.lineTo(cx + 72, cy + 155);
-    ctx.lineTo(cx + 10, cy + 10);
+    ctx.moveTo(cx-11*s,cy+7*s); ctx.lineTo(cx-w-5*s,cy+h);
+    ctx.lineTo(cx+w+5*s,cy+h);  ctx.lineTo(cx+11*s,cy+7*s);
     ctx.closePath();
-    ctx.fillStyle = '#b8926a';
-    ctx.fill();
+    ctx.fillStyle='#a07850'; ctx.fill();
 
-    // ── main paper (warm kraft)
-    const grad = ctx.createLinearGradient(cx - 60, cy, cx + 60, cy + 150);
-    grad.addColorStop(0, '#e8c99a');
-    grad.addColorStop(0.45, '#d4a96a');
-    grad.addColorStop(1,  '#c49060');
+    // kraft gradient
+    const g=ctx.createLinearGradient(cx-w,cy,cx+w,cy+h);
+    g.addColorStop(0,'#eecb90'); g.addColorStop(.42,'#d4a96a'); g.addColorStop(1,'#bd8a50');
     ctx.beginPath();
-    ctx.moveTo(cx - 5, cy + 5);
-    ctx.lineTo(cx - 62, cy + 148);
-    ctx.lineTo(cx + 62, cy + 148);
-    ctx.lineTo(cx + 5, cy + 5);
+    ctx.moveTo(cx-8*s,cy+6*s); ctx.lineTo(cx-w,cy+h);
+    ctx.lineTo(cx+w,cy+h);     ctx.lineTo(cx+8*s,cy+6*s);
     ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
+    ctx.fillStyle=g; ctx.fill();
 
-    // ── right fold (lighter crease)
+    // right fold
     ctx.beginPath();
-    ctx.moveTo(cx + 5, cy + 5);
-    ctx.lineTo(cx + 62, cy + 148);
-    ctx.lineTo(cx + 30, cy + 148);
-    ctx.lineTo(cx + 2, cy + 30);
+    ctx.moveTo(cx+8*s,cy+6*s); ctx.lineTo(cx+w,cy+h);
+    ctx.lineTo(cx+26*s,cy+h);  ctx.lineTo(cx+3*s,cy+26*s);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(255,220,160,0.35)';
-    ctx.fill();
+    ctx.fillStyle='rgba(255,220,155,0.26)'; ctx.fill();
 
-    // ── paper texture lines
-    ctx.strokeStyle = 'rgba(140,90,40,0.12)';
-    ctx.lineWidth = 0.8;
-    for (let i = 0; i < 5; i++) {
-        const yy = cy + 40 + i * 22;
-        const xOff = (yy - cy) * 0.9;
-        ctx.beginPath();
-        ctx.moveTo(cx - xOff * 0.5, yy);
-        ctx.lineTo(cx + xOff * 0.5, yy);
-        ctx.stroke();
+    // crease lines
+    ctx.strokeStyle='rgba(120,72,28,.09)'; ctx.lineWidth=.7;
+    for(let i=0;i<6;i++){
+        const yy=cy+(26+i*20)*s, xo=(yy-cy)*.88;
+        ctx.beginPath(); ctx.moveTo(cx-xo*.5,yy); ctx.lineTo(cx+xo*.5,yy); ctx.stroke();
     }
 
-    // ── twine bow
-    const bx = cx + 8, by = cy + 52;
-    ctx.lineWidth = 2.2;
-    ctx.strokeStyle = '#7a4a1a';
-    // left loop
-    ctx.beginPath();
-    ctx.ellipse(bx - 14, by - 8, 10, 7, -0.4, 0, Math.PI * 2);
-    ctx.stroke();
-    // right loop
-    ctx.beginPath();
-    ctx.ellipse(bx + 14, by - 8, 10, 7, 0.4, 0, Math.PI * 2);
-    ctx.stroke();
-    // knot
-    ctx.beginPath();
-    ctx.arc(bx, by, 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#7a4a1a';
-    ctx.fill();
-    // tails
-    ctx.beginPath();
-    ctx.moveTo(bx - 4, by + 3);
-    ctx.quadraticCurveTo(bx - 12, by + 20, bx - 8, by + 32);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(bx + 4, by + 3);
-    ctx.quadraticCurveTo(bx + 14, by + 20, bx + 10, by + 32);
-    ctx.stroke();
+    // bow
+    const bx=cx+5*s, by=cy+46*s;
+    ctx.lineWidth=2*s; ctx.strokeStyle='#6b3a14';
+    ctx.beginPath(); ctx.ellipse(bx-12*s,by-7*s,9*s,6*s,-0.4,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(bx+12*s,by-7*s,9*s,6*s, 0.4,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(bx,by,3.5*s,0,Math.PI*2);
+    ctx.fillStyle='#6b3a14'; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(bx-3*s,by+3*s); ctx.quadraticCurveTo(bx-11*s,by+17*s,bx-7*s,by+29*s); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx+3*s,by+3*s); ctx.quadraticCurveTo(bx+12*s,by+17*s,bx+9*s,by+29*s); ctx.stroke();
 
     ctx.restore();
 }
 
-function drawLeaf(x, y, tangentAngle, side, size) {
-    ctx.save();
-    ctx.translate(x, y);
-    // perpendicular to stem, flipped by side
-    ctx.rotate(tangentAngle + side * (Math.PI / 2 - 0.35));
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.bezierCurveTo(size * 0.4, -size * 0.5, size * 0.9, -size * 0.3, size, 0);
-    ctx.bezierCurveTo(size * 0.9, size * 0.3, size * 0.4, size * 0.4, 0, 0);
-    ctx.fillStyle = '#5a7a28';
-    ctx.fill();
-    // midrib
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(size * 0.85, 0);
-    ctx.strokeStyle = 'rgba(40,70,10,0.35)';
-    ctx.lineWidth = 0.8;
-    ctx.stroke();
+/* ─── leaf ─── */
+function drawLeaf(x,y,ang,side,size) {
+    ctx.save(); ctx.translate(x,y);
+    ctx.rotate(ang+side*(Math.PI/2-.35));
+    ctx.beginPath(); ctx.moveTo(0,0);
+    ctx.bezierCurveTo(size*.4,-size*.5,size*.9,-size*.3,size,0);
+    ctx.bezierCurveTo(size*.9,size*.3,size*.4,size*.4,0,0);
+    ctx.fillStyle='#527520'; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(size*.85,0);
+    ctx.strokeStyle='rgba(28,58,8,.3)'; ctx.lineWidth=.7; ctx.stroke();
     ctx.restore();
 }
 
+/* ─── stem ─── */
 function drawStem(f, progress) {
-    // Draw the stem up to `progress` along the Bézier
-    ctx.beginPath();
-    ctx.moveTo(f.p0.x, f.p0.y);
-    const STEPS = 60;
-    for (let s = 1; s <= STEPS; s++) {
-        const t = (s / STEPS) * progress;
-        const p = getBezierPoint(t, f.p0, f.p1, f.p2, f.p3);
-        ctx.lineTo(p.x, p.y);
+    ctx.beginPath(); ctx.moveTo(f.p0.x,f.p0.y);
+    for(let i=1;i<=55;i++){
+        const t=(i/55)*progress;
+        const p=bz(t,f.p0,f.p1,f.p2,f.p3);
+        ctx.lineTo(p.x,p.y);
     }
-    ctx.strokeStyle = '#4a6220';
-    ctx.lineWidth = 2.8;
-    ctx.lineCap = 'round';
-    ctx.stroke();
+    ctx.strokeStyle='#3e5818'; ctx.lineWidth=2.4*S; ctx.lineCap='round'; ctx.stroke();
 
-    // Leaves (appear as stem grows past their t)
-    f.leaves.forEach(leaf => {
-        if (progress >= leaf.t) {
-            const p  = getBezierPoint(leaf.t, f.p0, f.p1, f.p2, f.p3);
-            const tan = getBezierTangent(leaf.t, f.p0, f.p1, f.p2, f.p3);
-            const ang = Math.atan2(tan.y, tan.x);
-            drawLeaf(p.x, p.y, ang, leaf.side, leaf.size);
+    f.leaves.forEach(lf=>{
+        if(progress>=lf.t){
+            const p  =bz(lf.t,f.p0,f.p1,f.p2,f.p3);
+            const tan=bzTan(lf.t,f.p0,f.p1,f.p2,f.p3);
+            drawLeaf(p.x,p.y,Math.atan2(tan.y,tan.x),lf.side,lf.size);
         }
     });
 }
 
+/* ─── flower ─── */
 function drawFlower(f, progress) {
-    const t  = f.p3;
-    const p  = ease(progress);
-    const r  = (f.size / 2) * p;
+    const p=easeInOut(progress);
+    const r=(f.size/2)*p;
+    ctx.save(); ctx.translate(f.p3.x,f.p3.y);
 
-    ctx.save();
-    ctx.translate(t.x, t.y);
-
-    // ── petals
-    for (let i = 0; i < f.numPetals; i++) {
-        const angle = (i * Math.PI * 2) / f.numPetals + Math.PI * 0.1;
-        ctx.save();
-        ctx.rotate(angle);
-
-        // outer petal
-        const petalGrad = ctx.createRadialGradient(0, -r * 0.6, 0, 0, -r * 0.6, r * 1.2);
-        petalGrad.addColorStop(0, `hsl(${f.hue+6},100%,68%)`);
-        petalGrad.addColorStop(1, `hsl(${f.hue-4},95%,50%)`);
-
+    for(let i=0;i<f.numPetals;i++){
+        const angle=(i*Math.PI*2)/f.numPetals+.22;
+        ctx.save(); ctx.rotate(angle);
+        const pg=ctx.createRadialGradient(0,-r*.5,0,0,-r*.5,r*1.3);
+        pg.addColorStop(0,`hsl(${f.hue+8},100%,73%)`);
+        pg.addColorStop(1,`hsl(${f.hue-4},96%,52%)`);
         ctx.beginPath();
-        ctx.ellipse(0, -r * 0.85, r * 0.45, r * 1.1, 0, 0, Math.PI * 2);
-        ctx.fillStyle = petalGrad;
-        ctx.fill();
-        ctx.strokeStyle = `hsla(${f.hue-10},80%,42%,0.3)`;
-        ctx.lineWidth = 0.5;
-        ctx.stroke();
+        ctx.ellipse(0,-r*.82,r*.44,r*1.08,0,0,Math.PI*2);
+        ctx.fillStyle=pg; ctx.fill();
+        ctx.strokeStyle=`hsla(${f.hue-12},78%,44%,.22)`;
+        ctx.lineWidth=.5; ctx.stroke();
         ctx.restore();
     }
 
-    // ── disc center
-    if (p > 0.4) {
-        const discP = Math.min((p - 0.4) / 0.6, 1);
-        const discR  = (f.size / 2.8) * discP;
-
-        const discGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, discR);
-        discGrad.addColorStop(0,   '#5a2800');
-        discGrad.addColorStop(0.5, '#7a3c0a');
-        discGrad.addColorStop(1,   '#4a2000');
-        ctx.beginPath();
-        ctx.arc(0, 0, discR, 0, Math.PI * 2);
-        ctx.fillStyle = discGrad;
-        ctx.fill();
-
-        // stippling dots on disc
-        if (discP > 0.7) {
-            const dotCount = 14;
-            ctx.fillStyle = 'rgba(255,160,20,0.55)';
-            for (let d = 0; d < dotCount; d++) {
-                const da = (d / dotCount) * Math.PI * 2;
-                const dr = discR * 0.55;
-                ctx.beginPath();
-                ctx.arc(Math.cos(da)*dr, Math.sin(da)*dr, 1.2, 0, Math.PI*2);
-                ctx.fill();
+    if(p>.35){
+        const dp=Math.min((p-.35)/.65,1);
+        const dr=(f.size/2.6)*dp;
+        const dg=ctx.createRadialGradient(0,0,0,0,0,dr);
+        dg.addColorStop(0,'#4a2000'); dg.addColorStop(.5,'#70380a'); dg.addColorStop(1,'#3a1600');
+        ctx.beginPath(); ctx.arc(0,0,dr,0,Math.PI*2);
+        ctx.fillStyle=dg; ctx.fill();
+        if(dp>.65){
+            const dots=16; ctx.fillStyle=`hsla(${f.hue+20},100%,62%,.48)`;
+            for(let d=0;d<dots;d++){
+                const da=(d/dots)*Math.PI*2;
+                ctx.beginPath(); ctx.arc(Math.cos(da)*dr*.54,Math.sin(da)*dr*.54,1.1*S,0,Math.PI*2); ctx.fill();
             }
         }
     }
-
     ctx.restore();
+}
+
+/* ─── text: letter by letter ─── */
+const CHAR_DELAY = 4; // frames per char
+
+function getFontSize() {
+    return Math.round(Math.max(16, Math.min(W*.046, 38)));
+}
+
+function drawTextIncremental() {
+    if(textDone) return;
+    const fs   = getFontSize();
+    const font = `600 ${fs}px 'Dancing Script', cursive`;
+    tctx.font  = font;
+    tctx.textBaseline='middle';
+
+    const totalW  = tctx.measureText(TEXT).width;
+    const startX  = (W-totalW)/2;
+    const y       = Math.max(fs*1.9, H*.09);
+
+    tctx.clearRect(0,0,W,H);
+    tctx.shadowColor='rgba(255,185,0,.22)';
+    tctx.shadowBlur=10;
+    tctx.fillStyle='#8a5c00';
+
+    // draw committed chars
+    let x=startX;
+    for(let i=0;i<textCharIndex;i++){
+        tctx.globalAlpha=1;
+        tctx.fillText(TEXT[i],x,y);
+        x+=tctx.measureText(TEXT[i]).width;
+    }
+
+    // current char fading in
+    if(textCharIndex<TEXT.length){
+        const subF=(frame-textStartFrame)%CHAR_DELAY;
+        tctx.globalAlpha=subF/CHAR_DELAY;
+        tctx.fillText(TEXT[textCharIndex],x,y);
+        tctx.globalAlpha=1;
+        if(subF===CHAR_DELAY-1){
+            textCharIndex++;
+            if(textCharIndex>=TEXT.length) textDone=true;
+        }
+    }
+
+    tctx.shadowBlur=0; tctx.shadowColor='transparent';
 }
 
 /* ─── main loop ─── */
 function animate() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0,0,W,H);
 
-    const cx = canvas.width  / 2;
-    const cy = canvas.height * 0.72;
+    let allDone=true;
 
-    let allDone = true;
-
-    // Draw stems + flowers BEFORE wrapper (wrapper will cover base)
-    flowers.forEach(f => {
-        if (frame <= f.delay) { allDone = false; return; }
-
-        const stemElapsed  = frame - f.delay;
-        const stemT        = Math.min(stemElapsed / f.STEM_DUR, 1);
-        drawStem(f, stemT);
-
-        if (stemT < 1) {
-            allDone = false;
-        } else {
-            f.stemDone = true;
-        }
-
-        if (f.stemDone) {
-            const bloomElapsed = stemElapsed - f.STEM_DUR;
-            const bloomT       = Math.min(Math.max(bloomElapsed / f.BLOOM_DUR, 0), 1);
-            if (bloomT > 0) drawFlower(f, bloomT);
-            if (bloomT < 1) allDone = false;
+    flowers.forEach(f=>{
+        if(frame<=f.delay){ allDone=false; return; }
+        const se=frame-f.delay;
+        const st=Math.min(se/f.STEM_DUR,1);
+        drawStem(f,st);
+        if(st<1) allDone=false; else f.stemDone=true;
+        if(f.stemDone){
+            const bt=Math.min(Math.max((se-f.STEM_DUR)/f.BLOOM_DUR,0),1);
+            if(bt>0) drawFlower(f,bt);
+            if(bt<1) allDone=false;
         }
     });
 
-    // Wrapper drawn on top of stem bases
-    drawWrapper(cx, cy);
+    drawWrapper();
 
-    if (allDone && frame > 100) {
-        message.classList.add('show');
+    // Start text once bouquet is complete
+    if(allDone && frame>80){
+        if(textStartFrame<0) textStartFrame=frame;
+        drawTextIncremental();
     }
 
     frame++;
