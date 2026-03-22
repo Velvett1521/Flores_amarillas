@@ -78,7 +78,7 @@ function initFlowers() {
         // Three rings with generous spacing in both axes
         const ring = i%3;
         const distFactor = ring===0 ? 0.14 : ring===1 ? 0.25 : 0.34;
-        const dist = Math.min(W,H) * (distFactor + Math.random()*0.05);
+        const dist = Math.min(W,H) * (distFactor + Math.random()*0.04);
 
         // full spread: horizontal AND vertical
         const tx = CX + Math.cos(angle)*dist*(1.10+Math.random()*0.20);
@@ -249,9 +249,8 @@ function calcFontAndLines() {
     const line1  = words.slice(0, half).join(' ');
     const line2  = words.slice(half).join(' ');
 
-    // Shrink until both lines fit — never below a legible minimum
-    const MIN_FS = Math.max(20, W * 0.045);
-    while (fs > MIN_FS) {
+    // Shrink until both lines fit
+    while (fs > 14) {
         tctx.font = `600 ${fs}px 'Dancing Script', cursive`;
         const w1 = tctx.measureText(line1).width;
         const w2 = tctx.measureText(line2).width;
@@ -272,8 +271,8 @@ function buildLayout() {
 
     const lineH  = fs * 1.45;
     const totalH = lineH * lines.length;
-    // vertical anchor: enough padding from top, and safe in landscape where H is small
-    const topY   = Math.max(fs * 1.4, H * 0.04, 14);
+    // vertical anchor: top area, never below 14% of screen
+    const topY   = Math.max(fs * 1.6, H * 0.06);
     const lineY  = lines.map((_, i) => topY + i * lineH);
 
     // char list: [{char, line, x}] — x is pre-measured
@@ -292,21 +291,7 @@ function buildLayout() {
 }
 
 function drawTextIncremental() {
-    if (textDone) {
-        // text is complete — just repaint from cached TEXT_CHARS without rebuilding
-        if (!textLayout) return;
-        const { fs } = textLayout;
-        tctx.clearRect(0, 0, W, H);
-        tctx.font         = `600 ${fs}px 'Dancing Script', cursive`;
-        tctx.textBaseline = 'middle';
-        tctx.shadowColor  = 'rgba(255,185,0,.25)';
-        tctx.shadowBlur   = 10;
-        tctx.fillStyle    = '#8a5c00';
-        tctx.globalAlpha  = 1;
-        TEXT_CHARS.forEach(c => tctx.fillText(c.ch, c.x, c.y));
-        tctx.shadowBlur = 0; tctx.shadowColor = 'transparent';
-        return;
-    }
+    if (textDone) return;
 
     // Rebuild layout every frame so it stays correct after resize
     buildLayout();
@@ -349,17 +334,22 @@ function animate() {
 
     let allDone=true;
 
+    // ── pasada 1: todos los tallos y hojas
     flowers.forEach(f=>{
         if(frame<=f.delay){ allDone=false; return; }
         const se=frame-f.delay;
         const st=Math.min(se/f.STEM_DUR,1);
         drawStem(f,st);
         if(st<1) allDone=false; else f.stemDone=true;
-        if(f.stemDone){
-            const bt=Math.min(Math.max((se-f.STEM_DUR)/f.BLOOM_DUR,0),1);
-            if(bt>0) drawFlower(f,bt);
-            if(bt<1) allDone=false;
-        }
+    });
+
+    // ── pasada 2: todas las flores encima
+    flowers.forEach(f=>{
+        if(!f.stemDone) return;
+        const se=frame-f.delay;
+        const bt=Math.min(Math.max((se-f.STEM_DUR)/f.BLOOM_DUR,0),1);
+        if(bt>0) drawFlower(f,bt);
+        if(bt<1) allDone=false;
     });
 
     drawWrapper();
